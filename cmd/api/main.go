@@ -4,9 +4,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jaskrrish/Go-OKD/internal/handlers"
+	"github.com/jaskrrish/Go-OKD/internal/qkd/quantum"
 )
 
 func main() {
@@ -19,10 +21,21 @@ func main() {
 	// Create a new HTTP multiplexer
 	mux := http.NewServeMux()
 
-	// Register routes
+	// Initialize quantum backend (simulator for development)
+	quantumBackend := quantum.NewSimulatorBackend(true, 0.05) // 5% noise
+	qkdHandler := handlers.NewQKDHandler(quantumBackend)
+
+	// Register existing routes
 	mux.HandleFunc("/", handlers.HomeHandler)
 	mux.HandleFunc("/health", handlers.HealthHandler)
 	mux.HandleFunc("/api/v1/users", handlers.UsersHandler)
+
+	// Register QKD routes
+	mux.HandleFunc("/api/v1/qkd/health", qkdHandler.HealthCheckHandler)
+	mux.HandleFunc("/api/v1/qkd/session/initiate", qkdHandler.InitiateSessionHandler)
+	mux.HandleFunc("/api/v1/qkd/session/join", qkdHandler.JoinSessionHandler)
+	mux.HandleFunc("/api/v1/qkd/session/", handleQKDSession(qkdHandler))
+	mux.HandleFunc("/api/v1/qkd/key/", handleQKDKey(qkdHandler))
 
 	// Create server with timeouts
 	server := &http.Server{
@@ -47,4 +60,27 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 		log.Printf("Request completed in %v", time.Since(start))
 	})
+}
+
+// handleQKDSession routes QKD session-related requests
+func handleQKDSession(qkdHandler *handlers.QKDHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if strings.HasSuffix(path, "/execute") {
+			qkdHandler.ExecuteKeyExchangeHandler(w, r)
+		} else {
+			qkdHandler.GetSessionHandler(w, r)
+		}
+	}
+}
+
+// handleQKDKey routes QKD key-related requests
+func handleQKDKey(qkdHandler *handlers.QKDHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			qkdHandler.RevokeKeyHandler(w, r)
+		} else {
+			qkdHandler.GetKeyHandler(w, r)
+		}
+	}
 }
