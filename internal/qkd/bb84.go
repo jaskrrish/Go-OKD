@@ -40,17 +40,17 @@ func (bb *BB84Protocol) SetSampleSize(size float64) {
 
 // AliceSession represents Alice's side of the BB84 protocol
 type AliceSession struct {
-	bits   []quantum.Bit
-	bases  []quantum.Basis
-	qubits []quantum.Qubit
-	key    []quantum.Bit
+	Bits   []quantum.Bit
+	Bases  []quantum.Basis
+	Qubits []quantum.Qubit
+	Key    []quantum.Bit
 }
 
 // BobSession represents Bob's side of the BB84 protocol
 type BobSession struct {
-	bases           []quantum.Basis
-	measurements    []quantum.MeasurementResult
-	key             []quantum.Bit
+	Bases        []quantum.Basis
+	Measurements []quantum.MeasurementResult
+	Key          []quantum.Bit
 }
 
 // KeyExchangeResult contains the result of BB84 key exchange
@@ -70,17 +70,17 @@ func (bb *BB84Protocol) AliceGenerateQubits() (*AliceSession, error) {
 	transmissionLength := bb.keyLength * 4 // 4x oversampling for key sifting
 
 	alice := &AliceSession{
-		bits:  quantum.GenerateRandomBits(transmissionLength),
-		bases: quantum.GenerateRandomBases(transmissionLength),
+		Bits:  quantum.GenerateRandomBits(transmissionLength),
+		Bases: quantum.GenerateRandomBases(transmissionLength),
 	}
 
 	// Prepare qubits using the quantum backend
-	qubits, err := bb.backend.PrepareAndSend(alice.bits, alice.bases)
+	qubits, err := bb.backend.PrepareAndSend(alice.Bits, alice.Bases)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare qubits: %w", err)
 	}
 
-	alice.qubits = qubits
+	alice.Qubits = qubits
 
 	return alice, nil
 }
@@ -89,16 +89,16 @@ func (bb *BB84Protocol) AliceGenerateQubits() (*AliceSession, error) {
 func (bb *BB84Protocol) BobMeasureQubits(qubits []quantum.Qubit) (*BobSession, error) {
 	// Bob generates his own random measurement bases
 	bob := &BobSession{
-		bases: quantum.GenerateRandomBases(len(qubits)),
+		Bases: quantum.GenerateRandomBases(len(qubits)),
 	}
 
 	// Bob measures the qubits using his chosen bases
-	measurements, err := bb.backend.ReceiveAndMeasure(qubits, bob.bases)
+	measurements, err := bb.backend.ReceiveAndMeasure(qubits, bob.Bases)
 	if err != nil {
 		return nil, fmt.Errorf("failed to measure qubits: %w", err)
 	}
 
-	bob.measurements = measurements
+	bob.Measurements = measurements
 
 	return bob, nil
 }
@@ -113,7 +113,7 @@ type SiftedKey struct {
 // BasisReconciliation - Step 3: Alice and Bob compare bases (public channel)
 // Returns only the bits where Alice and Bob used the same basis
 func (bb *BB84Protocol) BasisReconciliation(alice *AliceSession, bob *BobSession) (*SiftedKey, error) {
-	if len(alice.bases) != len(bob.bases) {
+	if len(alice.Bases) != len(bob.Bases) {
 		return nil, fmt.Errorf("alice and bob must have same number of bases")
 	}
 
@@ -124,11 +124,11 @@ func (bb *BB84Protocol) BasisReconciliation(alice *AliceSession, bob *BobSession
 	}
 
 	// Compare bases and keep bits where bases match
-	for i := 0; i < len(alice.bases); i++ {
-		if alice.bases[i] == bob.bases[i] {
+	for i := 0; i < len(alice.Bases); i++ {
+		if alice.Bases[i] == bob.Bases[i] {
 			// Bases match - keep this bit
-			sifted.AliceKey = append(sifted.AliceKey, alice.bits[i])
-			sifted.BobKey = append(sifted.BobKey, bob.measurements[i].MeasuredBit)
+			sifted.AliceKey = append(sifted.AliceKey, alice.Bits[i])
+			sifted.BobKey = append(sifted.BobKey, bob.Measurements[i].MeasuredBit)
 			sifted.Indices = append(sifted.Indices, i)
 		}
 	}
@@ -211,7 +211,7 @@ func (bb *BB84Protocol) PerformKeyExchange() (*KeyExchangeResult, error) {
 	}
 
 	// Step 2: Bob measures qubits
-	bob, err := bb.BobMeasureQubits(alice.qubits)
+	bob, err := bb.BobMeasureQubits(alice.Qubits)
 	if err != nil {
 		return nil, fmt.Errorf("bob measurement failed: %w", err)
 	}
@@ -271,13 +271,13 @@ func (bb *BB84Protocol) PerformKeyExchange() (*KeyExchangeResult, error) {
 	}
 
 	// Truncate to desired key length
-	alice.key = finalSifted.AliceKey[:bb.keyLength]
-	bob.key = finalSifted.BobKey[:bb.keyLength]
+	alice.Key = finalSifted.AliceKey[:bb.keyLength]
+	bob.Key = finalSifted.BobKey[:bb.keyLength]
 
 	// Verify Alice and Bob have the same key
 	keyMatch := true
-	for i := 0; i < len(alice.key); i++ {
-		if alice.key[i] != bob.key[i] {
+	for i := 0; i < len(alice.Key); i++ {
+		if alice.Key[i] != bob.Key[i] {
 			keyMatch = false
 			break
 		}
@@ -290,8 +290,8 @@ func (bb *BB84Protocol) PerformKeyExchange() (*KeyExchangeResult, error) {
 	}
 
 	// Convert bits to bytes
-	result.Key = quantum.BitsToBytes(alice.key)
-	result.FinalKeyLength = len(alice.key)
+	result.Key = quantum.BitsToBytes(alice.Key)
+	result.FinalKeyLength = len(alice.Key)
 	result.Secure = true
 	result.Message = fmt.Sprintf("Secure key generated successfully! QBER: %.2f%%", qber*100)
 

@@ -137,13 +137,13 @@ func demoFullProtocol() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("  Alice generated %d qubits\n", len(alice.qubits))
+	fmt.Printf("  Alice generated %d qubits\n", len(alice.Qubits))
 
-	bob, err := bb84.BobMeasureQubits(alice.qubits)
+	bob, err := bb84.BobMeasureQubits(alice.Qubits)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("  Bob measured %d qubits\n", len(bob.measurements))
+	fmt.Printf("  Bob measured %d qubits\n", len(bob.Measurements))
 
 	// Step 2: Basis reconciliation
 	fmt.Println("\nStep 2: Basis Reconciliation (Classical Channel)")
@@ -153,7 +153,7 @@ func demoFullProtocol() {
 	}
 	fmt.Printf("  Sifted key: %d bits (%.1f%% efficiency)\n",
 		len(sifted.AliceKey),
-		float64(len(sifted.AliceKey))/float64(len(alice.bits))*100)
+		float64(len(sifted.AliceKey))/float64(len(alice.Bits))*100)
 
 	// Step 3: Error estimation
 	fmt.Println("\nStep 3: Error Detection")
