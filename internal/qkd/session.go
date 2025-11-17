@@ -172,7 +172,7 @@ func (sm *SessionManager) ExecuteKeyExchangeWithPostProcessing(sessionID uuid.UU
 	}
 
 	// Measure qubits (Bob)
-	bob, err := bb84.BobMeasureQubits(alice.qubits)
+	bob, err := bb84.BobMeasureQubits(alice.Qubits)
 	if err != nil {
 		sm.updateSessionStatus(sessionID, qkd.SessionFailed, 0, 0, 0, false, err.Error())
 		return nil, err
