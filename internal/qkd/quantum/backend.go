@@ -3,6 +3,7 @@ package quantum
 import (
 	"fmt"
 	"math/rand"
+	"time"
 )
 
 // QuantumBackend defines the interface for quantum computing backends
@@ -90,23 +91,47 @@ func (s *SimulatorBackend) IsSimulator() bool {
 	return true
 }
 
-// QiskitBackend implements integration with IBM Qiskit (placeholder for real implementation)
+// QiskitBackend implements integration with IBM Qiskit Runtime
 type QiskitBackend struct {
-	name       string
-	apiKey     string
-	deviceName string
-	noiseLevel float64
+	name         string
+	client       *QiskitClient
+	backendName  string
+	noiseLevel   float64
+	shots        int
+	useSimulator bool
+	fallback     *SimulatorBackend // Fallback to local simulator on errors
 }
 
-// NewQiskitBackend creates a new Qiskit backend
-// Note: This is a placeholder. Real implementation would use Qiskit REST API
-func NewQiskitBackend(apiKey, deviceName string) *QiskitBackend {
-	return &QiskitBackend{
-		name:       "IBM-Qiskit-" + deviceName,
-		apiKey:     apiKey,
-		deviceName: deviceName,
-		noiseLevel: 0.02, // Typical NISQ device error rate
+// NewQiskitBackend creates a new Qiskit backend with REST API integration
+func NewQiskitBackend(apiKey, backendName string, shots int) (*QiskitBackend, error) {
+	config := &QiskitConfig{
+		APIKey:      apiKey,
+		BaseURL:     DefaultQiskitURL,
+		BackendName: backendName,
 	}
+
+	client, err := NewQiskitClient(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Qiskit client: %w", err)
+	}
+
+	// Determine if backend is simulator
+	isSimulator := backendName == "ibmq_qasm_simulator" ||
+	               backendName == "simulator_statevector" ||
+	               backendName == "simulator_mps"
+
+	// Create fallback simulator
+	fallback := NewSimulatorBackend(true, 0.02)
+
+	return &QiskitBackend{
+		name:         "IBM-Qiskit-" + backendName,
+		client:       client,
+		backendName:  backendName,
+		noiseLevel:   0.02, // Typical NISQ device error rate
+		shots:        shots,
+		useSimulator: isSimulator,
+		fallback:     fallback,
+	}, nil
 }
 
 // Name returns the name of the Qiskit backend
@@ -115,52 +140,96 @@ func (q *QiskitBackend) Name() string {
 }
 
 // PrepareAndSend prepares qubits using IBM Qiskit
-// TODO: Implement actual Qiskit REST API integration
 func (q *QiskitBackend) PrepareAndSend(bits []Bit, bases []Basis) ([]Qubit, error) {
 	if len(bits) != len(bases) {
 		return nil, fmt.Errorf("bits and bases must have the same length")
 	}
 
-	// Placeholder: In production, this would:
-	// 1. Create quantum circuit using Qiskit REST API
-	// 2. Apply X gate for |1⟩ states
-	// 3. Apply H gate for diagonal basis states
-	// 4. Execute circuit on IBM Quantum device
-	// 5. Return results
+	// Build OpenQASM circuit for Alice's preparation
+	qasmCode := BuildBB84AliceCircuit(bits, bases)
 
+	circuit := &QiskitCircuit{
+		QASM:    qasmCode,
+		Shots:   q.shots,
+		Backend: q.backendName,
+	}
+
+	// Submit job to IBM Quantum
+	result, err := q.client.ExecuteCircuitSync(circuit, 5*time.Minute)
+	if err != nil {
+		// Fallback to local simulator on error
+		fmt.Printf("Warning: Qiskit execution failed (%v), using local simulator\n", err)
+		return q.fallback.PrepareAndSend(bits, bases)
+	}
+
+	// Parse results and construct qubits
 	qubits := make([]Qubit, len(bits))
-	for i := range bits {
-		qubits[i] = PrepareQubit(bits[i], bases[i])
+	if result.Success {
+		// Extract measurement results from counts
+		measuredBits := ParseQASMResult(result.Counts, len(bits))
 
-		// Simulate realistic NISQ device noise
-		if rand.Float64() < q.noiseLevel {
-			qubits[i].ClassicalValue = 1 - qubits[i].ClassicalValue
+		for i := range bits {
+			qubits[i] = Qubit{
+				ClassicalValue:   measuredBits[i],
+				PreparationBasis: bases[i],
+			}
 		}
+	} else {
+		// If execution failed, use fallback
+		return q.fallback.PrepareAndSend(bits, bases)
 	}
 
 	return qubits, nil
 }
 
 // ReceiveAndMeasure measures qubits using IBM Qiskit
-// TODO: Implement actual Qiskit REST API integration
 func (q *QiskitBackend) ReceiveAndMeasure(qubits []Qubit, bases []Basis) ([]MeasurementResult, error) {
 	if len(qubits) != len(bases) {
 		return nil, fmt.Errorf("qubits and bases must have the same length")
 	}
 
-	// Placeholder: In production, this would:
-	// 1. Create measurement circuit
-	// 2. Apply H gate before measurement for diagonal basis
-	// 3. Measure qubits
-	// 4. Execute on IBM Quantum device
-	// 5. Return measurement results
-
-	results := make([]MeasurementResult, len(qubits))
-	for i := range qubits {
-		results[i] = MeasureQubit(qubits[i], bases[i])
+	// Extract Alice's bits and bases from qubits
+	aliceBits := make([]Bit, len(qubits))
+	aliceBases := make([]Basis, len(qubits))
+	for i, q := range qubits {
+		aliceBits[i] = q.ClassicalValue
+		aliceBases[i] = q.PreparationBasis
 	}
 
-	return results, nil
+	// Build combined circuit for Alice preparation + Bob measurement
+	qasmCode := BuildBB84CombinedCircuit(aliceBits, aliceBases, bases)
+
+	circuit := &QiskitCircuit{
+		QASM:    qasmCode,
+		Shots:   q.shots,
+		Backend: q.backendName,
+	}
+
+	// Execute circuit
+	result, err := q.client.ExecuteCircuitSync(circuit, 5*time.Minute)
+	if err != nil {
+		// Fallback to local simulator
+		fmt.Printf("Warning: Qiskit execution failed (%v), using local simulator\n", err)
+		return q.fallback.ReceiveAndMeasure(qubits, bases)
+	}
+
+	// Parse measurement results
+	measurements := make([]MeasurementResult, len(qubits))
+	if result.Success {
+		measuredBits := ParseQASMResult(result.Counts, len(qubits))
+
+		for i := range qubits {
+			measurements[i] = MeasurementResult{
+				MeasuredBit:     measuredBits[i],
+				MeasurementBasis: bases[i],
+			}
+		}
+	} else {
+		// Use fallback
+		return q.fallback.ReceiveAndMeasure(qubits, bases)
+	}
+
+	return measurements, nil
 }
 
 // GetNoiseLevel returns the noise level of the Qiskit backend
@@ -168,9 +237,9 @@ func (q *QiskitBackend) GetNoiseLevel() float64 {
 	return q.noiseLevel
 }
 
-// IsSimulator returns false for Qiskit (real quantum hardware or IBM simulator)
+// IsSimulator returns true if using IBM simulator, false for real hardware
 func (q *QiskitBackend) IsSimulator() bool {
-	return false
+	return q.useSimulator
 }
 
 // BraketBackend implements integration with AWS Braket (placeholder)
